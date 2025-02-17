@@ -25,6 +25,8 @@ limitations under the License.
 #include "globals.h"
 #include "libpax.h"
 
+#define MAX_HASHSET_LINKS 64	// 2048 entries per snifftype
+
 uint8_t channel = 0;  // channel rotation counter
 
 static inline uint32_t fnv1a_32(const void *buffer, size_t len) {
@@ -70,6 +72,7 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
   uint16_t hash = hash_mac_address(addr);
   const uint16_t orig_slot = hash & 31;
   uint16_t slot = orig_slot;
+  int links = 0;
 
   *is_new_entry = false;
 
@@ -82,7 +85,23 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
     slot++;
     if (slot == orig_slot) {
       last_phs = phs;
-      phs = phs->next;
+
+      links++;
+      if (links <= MAX_HASHSET_LINKS) {
+        phs = phs->next;
+        continue;
+      }
+
+      if (first_empty) {
+        // we previously found an empty slot, store it there
+        *first_empty = hash;
+        *is_new_entry = true;
+      } else {
+        // no empty slots were found, replace one in the last link
+        last_phs[orig_slot] = hash;
+      }
+
+      return orig_phs;
     }
   }
 
