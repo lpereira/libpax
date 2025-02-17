@@ -38,14 +38,16 @@ static inline uint32_t fnv1a_32(const void *buffer, size_t len) {
   return hash;
 }
 
-static uint32_t hash_mac_address(const uint8_t addr[6]) {
-  return fnv1a_32(addr, 6);
+static uint16_t hash_mac_address(const uint8_t addr[6]) {
+  const uint32_t hash = fnv1a_32(addr, 6);
+  const uint16_t part_a = (uint16_t)hash;
+  const uint16_t part_b = (uint16_t)(hash >> 16);
+  return part_a ^ part_b;
 }
 
 struct paxhashset {
   struct paxhashset *next;
-  uint8_t count;
-  uint32_t elements[];
+  uint16_t elements[];
 };
 
 static struct paxhashset *pax_hashset_new(void) {
@@ -53,15 +55,10 @@ static struct paxhashset *pax_hashset_new(void) {
       malloc(sizeof(struct paxhashset) + 32 * sizeof(uint32_t));
   if (!phs) return NULL;
 
-  phs->count = 0;
   phs->next = NULL;
   memset(phs->elements, 0, 32 * sizeof(uint32_t));
 
   return phs;
-}
-
-static uint32_t pax_hashset_count(const struct paxhashset *phs) {
-  return phs ? phs->count + pax_hashset_count(phs->next) : 0;
 }
 
 static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
@@ -69,8 +66,7 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
                                           bool *is_new_entry) {
   struct paxhashset *orig_phs = phs;
   uint32_t *first_empty = NULL;
-  uint8_t *first_empty_count = NULL;
-  uint32_t hash = hash_mac_address(addr);
+  uint16_t hash = hash_mac_address(addr);
   const uint32_t orig_slot = hash & 31;
   uint32_t slot = orig_slot;
 
@@ -79,10 +75,8 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
   while (phs) {
     if (phs->elements[slot] == hash) return orig_phs;
 
-    if (!first_empty && phs->elements[slot] == 0) {
+    if (!first_empty && phs->elements[slot] == 0)
       first_empty = &phs->elements[slot];
-      first_empty_count = &phs->count;
-    }
 
     slot++;
     if (slot == orig_slot) phs = phs->next;
@@ -90,7 +84,6 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
 
   if (first_empty) {
     *first_empty = hash;
-    *first_empty_count++;
     *is_new_entry = true;
     return orig_phs;
   }
@@ -103,7 +96,6 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
 
   phs->next = orig_phs;
   phs->elements[orig_slot] = hash;
-  phs->count = 1;
   *is_new_entry = true;
   return phs;
 }
@@ -117,18 +109,20 @@ static void pax_hashset_clear(struct paxhashset *phs) {
 
 static struct paxhashset *phs_wifi;
 static struct paxhashset *phs_ble;
+static int count_wifi, count_ble;
 
 void libpax_counter_reset() {
   pax_hashset_clear(phs_wifi);
   pax_hashset_clear(phs_ble);
+  count_wifi = count_ble = 0;
 
   phs_wifi = pax_hashset_new();
   phs_ble = pax_hashset_new();
 }
 
-int libpax_wifi_counter_count() { return pax_hashset_count(phs_wifi); }
+int libpax_wifi_counter_count() { return count_wifi; }
 
-int libpax_ble_counter_count() { return pax_hashset_count(phs_ble); }
+int libpax_ble_counter_count() { return count_ble; }
 
 IRAM_ATTR int mac_add(uint8_t *paddr, snifftype_t sniff_type) {
   if (!(paddr[0] & 0b10)) {
@@ -140,9 +134,11 @@ IRAM_ATTR int mac_add(uint8_t *paddr, snifftype_t sniff_type) {
   switch (sniff_type) {
     case MAC_SNIFF_BLE:
       phs_ble = pax_hashset_add(phs_ble, paddr, &is_new_entry);
+      if (is_new_entry) count_ble++;
       break;
     case MAC_SNIFF_WIFI:
       phs_wifi = pax_hashset_add(phs_wifi, paddr, &is_new_entry);
+      if (is_new_entry) count_wifi++;
       break;
     default:
       return 0;
