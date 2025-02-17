@@ -82,7 +82,7 @@ static struct paxhashmap *pax_hashmap_add(struct paxhashmap *phm, const uint8_t 
         if (phm->elements[slot] == hash)
             return orig_phm;
 
-        if (!first_emtpy && phm->elements[slot] == 0) {
+        if (!first_empty && phm->elements[slot] == 0) {
             first_empty = &phm->elements[slot];
             first_empty_count = &phm->count;
         }
