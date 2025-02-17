@@ -49,7 +49,7 @@ struct paxhashmap {
     uint32_t elements[];
 };
 
-struct paxhashmap *pax_hashmap_new(void)
+static struct paxhashmap *pax_hashmap_new(void)
 {
     struct paxhashmap *phm = malloc(sizeof(struct paxhashmap) + 32 * sizeof(uint32_t));
     if (!phm)
@@ -62,12 +62,12 @@ struct paxhashmap *pax_hashmap_new(void)
     return phm;
 }
 
-uint32_t pax_hashmap_count(const struct paxhashmap *phm)
+static uint32_t pax_hashmap_count(const struct paxhashmap *phm)
 {
     return phm ? phm->count + pax_hashmap_count(phm->next) : 0;
 }
 
-struct paxhashmap *pax_hashmap_add(struct paxhashmap *phm, const uint8_t addr[6], bool *is_new_entry)
+static struct paxhashmap *pax_hashmap_add(struct paxhashmap *phm, const uint8_t addr[6], bool *is_new_entry)
 {
     struct paxhashmap *orig_phm = phm;
     uint32_t *first_empty = NULL;
@@ -110,7 +110,7 @@ struct paxhashmap *pax_hashmap_add(struct paxhashmap *phm, const uint8_t addr[6]
     return phm;
 }
 
-void pax_hashmap_clear(struct paxhashmap *phm)
+static void pax_hashmap_clear(struct paxhashmap *phm)
 {
     if (phm) {
         pax_hashmap_clear(phm->next);
