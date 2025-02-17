@@ -65,10 +65,11 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
                                           const uint8_t addr[6],
                                           bool *is_new_entry) {
   struct paxhashset *orig_phs = phs;
+  struct paxhashset *last_phs = phs;
   uint32_t *first_empty = NULL;
   uint16_t hash = hash_mac_address(addr);
-  const uint32_t orig_slot = hash & 31;
-  uint32_t slot = orig_slot;
+  const uint16_t orig_slot = hash & 31;
+  uint16_t slot = orig_slot;
 
   *is_new_entry = false;
 
@@ -79,7 +80,10 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
       first_empty = &phs->elements[slot];
 
     slot++;
-    if (slot == orig_slot) phs = phs->next;
+    if (slot == orig_slot) {
+      last_phs = phs;
+      phs = phs->next;
+    }
   }
 
   if (first_empty) {
@@ -90,7 +94,15 @@ static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
 
   phs = pax_hashset_new();
   if (!phs) {
-    // we ran out of memory, so don't count this address.
+    // we ran out of memory, so replace the last element in this hashset
+    // with the one we're trying to add.  if the replaced item ends up
+    // being scanned again, it'll be added to the beginning of the link
+    // chain, making this work similarly to a LRU cache.
+    //
+    // possible improvements:
+    // - some kind of hysteresis
+    // - limit the number of links in the chain to curb memory usage
+    last_phs[orig_slot] = hash;
     return orig_phs;
   }
 
