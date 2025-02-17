@@ -2,6 +2,7 @@
 LICENSE
 
 Copyright  2020      Deutsche Bahn Station&Service AG
+Copyright  2025      Laboratório Hacker de Campinas
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,77 +17,138 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 */
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "globals.h"
 #include "libpax.h"
 
-typedef uint32_t bitmap_t;
-enum { BITS_PER_WORD = sizeof(bitmap_t) * CHAR_BIT };
-#define WORD_OFFSET(b) ((b) / BITS_PER_WORD)
-#define BIT_OFFSET(b) ((b) % BITS_PER_WORD)
-#define LIBPAX_MAX_SIZE 0xFFFF  // full enumeration of uint16_t
-#define LIBPAX_MAP_SIZE (LIBPAX_MAX_SIZE / BITS_PER_WORD)
-
-DRAM_ATTR bitmap_t seen_ids_map[LIBPAX_MAP_SIZE];
-int seen_ids_count = 0;
-
-uint16_t macs_wifi = 0;
-uint16_t macs_ble = 0;
-
 uint8_t channel = 0;  // channel rotation counter
 
-IRAM_ATTR void set_id(bitmap_t *bitmap, uint16_t id) {
-  bitmap[WORD_OFFSET(id)] |= ((bitmap_t)1 << BIT_OFFSET(id));
+static inline uint32_t fnv1a_32(const void *buffer, size_t len) {
+  const unsigned char *data = (unsigned char *)buffer;
+  uint32_t hash;
+
+  for (hash = 0x811c9dc5u; len--; data++) {
+    hash = (hash ^ *data) * 0x1000193u;
+  }
+
+  return hash;
 }
 
-IRAM_ATTR int get_id(bitmap_t *bitmap, uint16_t id) {
-  bitmap_t bit = bitmap[WORD_OFFSET(id)] & ((bitmap_t)1 << BIT_OFFSET(id));
-  return bit != 0;
+static uint32_t hash_mac_address(const uint8_t addr[6]) {
+  return fnv1a_32(addr, 6);
 }
 
-/** remember given id
- * returns 1 if id is new, 0 if already seen this is since last reset
- */
-IRAM_ATTR int add_to_bucket(uint16_t id) {
-  if (get_id(seen_ids_map, id)) {
-    return 0;  // already seen
-  } else {
-    set_id(seen_ids_map, id);
-    seen_ids_count++;
-    return 1;  // new
+struct paxhashset {
+  struct paxhashset *next;
+  uint8_t count;
+  uint32_t elements[];
+};
+
+static struct paxhashset *pax_hashset_new(void) {
+  struct paxhashset *phs =
+      malloc(sizeof(struct paxhashset) + 32 * sizeof(uint32_t));
+  if (!phs) return NULL;
+
+  phs->count = 0;
+  phs->next = NULL;
+  memset(phs->elements, 0, 32 * sizeof(uint32_t));
+
+  return phs;
+}
+
+static uint32_t pax_hashset_count(const struct paxhashset *phs) {
+  return phs ? phs->count + pax_hashset_count(phs->next) : 0;
+}
+
+static struct paxhashset *pax_hashset_add(struct paxhashset *phs,
+                                          const uint8_t addr[6],
+                                          bool *is_new_entry) {
+  struct paxhashset *orig_phs = phs;
+  uint32_t *first_empty = NULL;
+  uint8_t *first_empty_count = NULL;
+  uint32_t hash = hash_mac_address(addr);
+  const uint32_t orig_slot = hash & 31;
+  uint32_t slot = orig_slot;
+
+  *is_new_entry = false;
+
+  while (phs) {
+    if (phs->elements[slot] == hash) return orig_phs;
+
+    if (!first_empty && phs->elements[slot] == 0) {
+      first_empty = &phs->elements[slot];
+      first_empty_count = &phs->count;
+    }
+
+    slot++;
+    if (slot == orig_slot) phs = phs->next;
+  }
+
+  if (first_empty) {
+    *first_empty = hash;
+    *first_empty_count++;
+    *is_new_entry = true;
+    return orig_phs;
+  }
+
+  phs = pax_hashset_new();
+  if (!phs) {
+    // we ran out of memory, so don't count this address.
+    return orig_phs;
+  }
+
+  phs->next = orig_phs;
+  phs->elements[orig_slot] = hash;
+  phs->count = 1;
+  *is_new_entry = true;
+  return phs;
+}
+
+static void pax_hashset_clear(struct paxhashset *phs) {
+  if (phs) {
+    pax_hashset_clear(phs->next);
+    free(phs);
   }
 }
 
-void reset_bucket() {
-  memset(seen_ids_map, 0, sizeof(seen_ids_map));
-  seen_ids_count = 0;
+static struct paxhashset *phs_wifi;
+static struct paxhashset *phs_ble;
+
+void libpax_counter_reset() {
+  pax_hashset_clear(phs_wifi);
+  pax_hashset_clear(phs_ble);
+
+  phs_wifi = pax_hashset_new();
+  phs_ble = pax_hashset_new();
 }
 
-int libpax_wifi_counter_count() { return macs_wifi; }
+int libpax_wifi_counter_count() { return pax_hashset_count(phs_wifi); }
 
-int libpax_ble_counter_count() { return macs_ble; }
+int libpax_ble_counter_count() { return pax_hashset_count(phs_ble); }
 
 IRAM_ATTR int mac_add(uint8_t *paddr, snifftype_t sniff_type) {
-  uint16_t *id;
-  // mac addresses are 6 bytes long, we only use the last two bytes
-  id = (uint16_t *)(paddr + 4);
-    
-  //ESP_LOGD(TAG, "MAC=%02x:%02x:%02x:%02x:%02x:%02x -> ID=%04x", paddr[0],
-  //         paddr[1], paddr[2], paddr[3], paddr[4], paddr[5], *id);
-    
-  // if it is NOT a locally administered ("random") mac, we don't count it
-  if (!(paddr[0] & 0b10)) return false;
-  
-  int added = add_to_bucket(*id);
+  if (!(paddr[0] & 0b10)) {
+    // if it is NOT a locally administered ("random") mac, we don't count it
+    return 0;
+  }
 
-  // Count only if MAC was not yet seen
-  if (added) {
-    if(sniff_type == MAC_SNIFF_BLE) {
-      macs_ble++;
-    } else if(sniff_type == MAC_SNIFF_WIFI)  {
-      macs_wifi++;
-    }
-  };  // added
+  bool is_new_entry;
+  switch (sniff_type) {
+    case MAC_SNIFF_BLE:
+      phs_ble = pax_hashset_add(phs_ble, paddr, &is_new_entry);
+      break;
+    case MAC_SNIFF_WIFI:
+      phs_wifi = pax_hashset_add(phs_wifi, paddr, &is_new_entry);
+      break;
+    default:
+      return 0;
+  }
 
-  return added;  // function returns bool if a new and unique Wifi or BLE mac
-                 // was counted (true) or not (false)
+  // function returns bool if a new and unique Wifi or BLE mac
+  // was counted (true) or not (false)
+  return is_new_entry;
 }

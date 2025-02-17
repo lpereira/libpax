@@ -34,12 +34,6 @@ void fill_counter(struct count_payload_t* pCount) {
   pCount->pax = pCount->wifi_count + pCount->ble_count;
 }
 
-void libpax_counter_reset() {
-  macs_wifi = 0;
-  macs_ble = 0;
-  reset_bucket();
-}
-
 void report(TimerHandle_t xTimer) {
   fill_counter(pCurrent_count);
   report_callback();
