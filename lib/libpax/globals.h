@@ -10,8 +10,6 @@
 #include <Arduino.h>
 #endif
 
-extern uint16_t macs_wifi;
-extern uint16_t macs_ble;
 extern uint8_t channel;  // wifi channel rotation counter
 extern TimerHandle_t WifiChanTimer;
 
