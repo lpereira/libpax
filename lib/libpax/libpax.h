@@ -23,7 +23,7 @@ struct libpax_config_storage_t {
     uint8_t checksum[4]; 
 };
 
-typedef enum { MAC_SNIFF_WIFI, MAC_SNIFF_BLE, MAC_SNIFF_BLE_ENS } snifftype_t;
+typedef enum { MAC_SNIFF_WIFI, MAC_SNIFF_BLE, MAX_MAC_SNIFF_TYPE } snifftype_t;
 
 int libpax_wifi_counter_count();
 int libpax_ble_counter_count();

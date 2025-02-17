@@ -119,44 +119,36 @@ static void pax_hashset_clear(struct paxhashset *phs) {
   }
 }
 
-static struct paxhashset *phs_wifi;
-static struct paxhashset *phs_ble;
-static int count_wifi, count_ble;
+static struct {
+  struct paxhashset *hashset;
+  int counter;
+
+  bool add(uint8_t *paddr) {
+    bool is_new_entry;
+    hashset = pax_hashset_add(hashset, paddr, &is_new_entry);
+    if (is_new_entry) counter++;
+    return is_new_entry;
+  }
+
+  void reset() {
+    pax_hashset_clear(hashset);
+    hashset = pax_hashset_new();
+    counter = 0;
+  }
+} counters[MAX_MAC_SNIFF_TYPE];
 
 void libpax_counter_reset() {
-  pax_hashset_clear(phs_wifi);
-  pax_hashset_clear(phs_ble);
-  count_wifi = count_ble = 0;
-
-  phs_wifi = pax_hashset_new();
-  phs_ble = pax_hashset_new();
+  for (int i = 0; i < MAX_MAC_SNIFF_TYPE; i++) counters[i].reset();
 }
 
-int libpax_wifi_counter_count() { return count_wifi; }
+int libpax_wifi_counter_count() { return counters[MAC_SNIFF_WIFI].counter; }
 
-int libpax_ble_counter_count() { return count_ble; }
+int libpax_ble_counter_count() { return counters[MAC_SNIFF_BLE].counter; }
 
 IRAM_ATTR int mac_add(uint8_t *paddr, snifftype_t sniff_type) {
-  if (!(paddr[0] & 0b10)) {
-    // if it is NOT a locally administered ("random") mac, we don't count it
-    return 0;
-  }
+  // if it is NOT a locally administered ("random") mac, we don't count it
+  if (!(paddr[0] & 0b10)) return 0;
 
-  bool is_new_entry;
-  switch (sniff_type) {
-    case MAC_SNIFF_BLE:
-      phs_ble = pax_hashset_add(phs_ble, paddr, &is_new_entry);
-      if (is_new_entry) count_ble++;
-      break;
-    case MAC_SNIFF_WIFI:
-      phs_wifi = pax_hashset_add(phs_wifi, paddr, &is_new_entry);
-      if (is_new_entry) count_wifi++;
-      break;
-    default:
-      return 0;
-  }
-
-  // function returns bool if a new and unique Wifi or BLE mac
-  // was counted (true) or not (false)
-  return is_new_entry;
+  return (sniff_type < MAX_MAC_SNIFF_TYPE) ? counters[sniff_type].add(paddr)
+                                           : 0;
 }
