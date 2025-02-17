@@ -29,10 +29,9 @@ uint8_t channel = 0;  // channel rotation counter
 static inline uint32_t fnv1a_32(const void *buffer, size_t len)
 {
     const unsigned char *data = (unsigned char *)buffer;
-    extern uint32_t fnv1a_32_seed;
     uint32_t hash;
 
-    for (hash = fnv1a_32_seed; len--; data++) {
+    for (hash = 0x811c9dc5u; len--; data++) {
         hash = (hash ^ *data) * 0x1000193u;
     }
 
