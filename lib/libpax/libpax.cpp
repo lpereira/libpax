@@ -102,7 +102,9 @@ struct paxhashmap *pax_hashmap_add(struct paxhashmap *phm, const uint8_t addr[6]
     phm = pax_hashmap_new();
     if (phm) {
         phm->next = orig_phm;
-        return pax_hashmap_add(phm, addr);
+        phm->elements[orig_slot] = hash;
+        phm->count = 1;
+        *is_new_entry = true;
     }
 
     return phm;
